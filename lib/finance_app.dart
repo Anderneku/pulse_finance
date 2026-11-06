@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -412,6 +413,7 @@ class PulseFinanceApp extends StatelessWidget {
         title: 'Pulse Finance',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
+          platform: defaultTargetPlatform,
           brightness: Brightness.dark,
           scaffoldBackgroundColor: _background,
           colorScheme: const ColorScheme.dark(
@@ -421,9 +423,13 @@ class PulseFinanceApp extends StatelessWidget {
             error: _red,
           ).copyWith(primary: accent),
           useMaterial3: true,
-          fontFamily: 'Inter',
+          fontFamily: defaultTargetPlatform == TargetPlatform.macOS
+              ? null
+              : 'Inter',
           textTheme: ThemeData.dark().textTheme.apply(
-            fontFamily: 'Inter',
+            fontFamily: defaultTargetPlatform == TargetPlatform.macOS
+                ? null
+                : 'Inter',
             bodyColor: Colors.white,
             displayColor: Colors.white,
           ),
@@ -482,6 +488,16 @@ const _monthNames = [
   'November',
   'December',
 ];
+
+class _NewEntryIntent extends Intent {
+  const _NewEntryIntent();
+}
+
+class _SelectSectionIntent extends Intent {
+  const _SelectSectionIntent(this.index);
+
+  final int index;
+}
 
 class FinanceHome extends StatefulWidget {
   const FinanceHome({super.key, required this.store});
@@ -577,12 +593,26 @@ class _FinanceHomeState extends State<FinanceHome> with WidgetsBindingObserver {
   }
 
   Future<void> _showEntry({bool income = false}) async {
-    final entry = await showModalBottomSheet<FinanceEntry>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => EntrySheet(store: store, initialIncome: income),
-    );
+    final isMacOS = Theme.of(context).platform == TargetPlatform.macOS;
+    final entry = isMacOS
+        ? await showDialog<FinanceEntry>(
+            context: context,
+            builder: (context) => Dialog(
+              backgroundColor: Colors.transparent,
+              insetPadding: const EdgeInsets.all(32),
+              child: SizedBox(
+                width: 620,
+                child: EntrySheet(store: store, initialIncome: income),
+              ),
+            ),
+          )
+        : await showModalBottomSheet<FinanceEntry>(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (context) =>
+                EntrySheet(store: store, initialIncome: income),
+          );
     if (entry != null) {
       try {
         await store.addEntry(entry);
@@ -601,7 +631,8 @@ class _FinanceHomeState extends State<FinanceHome> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 1000;
+    final isMacOS = Theme.of(context).platform == TargetPlatform.macOS;
+    final wide = MediaQuery.sizeOf(context).width >= (isMacOS ? 760 : 1000);
     final pages = [
       _dashboard(),
       _expenses(),
@@ -609,74 +640,120 @@ class _FinanceHomeState extends State<FinanceHome> with WidgetsBindingObserver {
       _analytics(),
       _settings(),
     ];
-    return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: Row(
-          children: [
-            if (wide)
-              _NavigationPanel(selected: _tab, onSelect: _goTo, store: store),
-            Expanded(
-              child: Column(
+    final shortcuts = isMacOS
+        ? <ShortcutActivator, Intent>{
+            const SingleActivator(LogicalKeyboardKey.keyN, meta: true):
+                const _NewEntryIntent(),
+            const SingleActivator(LogicalKeyboardKey.digit1, meta: true):
+                const _SelectSectionIntent(0),
+            const SingleActivator(LogicalKeyboardKey.digit2, meta: true):
+                const _SelectSectionIntent(1),
+            const SingleActivator(LogicalKeyboardKey.digit3, meta: true):
+                const _SelectSectionIntent(2),
+            const SingleActivator(LogicalKeyboardKey.digit4, meta: true):
+                const _SelectSectionIntent(3),
+            const SingleActivator(LogicalKeyboardKey.digit5, meta: true):
+                const _SelectSectionIntent(4),
+          }
+        : const <ShortcutActivator, Intent>{};
+    return Shortcuts(
+      shortcuts: shortcuts,
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _NewEntryIntent: CallbackAction<_NewEntryIntent>(
+            onInvoke: (_) {
+              _showEntry();
+              return null;
+            },
+          ),
+          _SelectSectionIntent: CallbackAction<_SelectSectionIntent>(
+            onInvoke: (intent) {
+              _goTo(intent.index);
+              return null;
+            },
+          ),
+        },
+        child: Focus(
+          autofocus: true,
+          child: Scaffold(
+            body: SafeArea(
+              bottom: false,
+              child: Row(
                 children: [
-                  _TopBar(
-                    month: _month,
-                    settings: store.settings,
-                    remaining: store.remaining,
-                    onMonthChanged: (delta) => setState(() {
-                      _month = DateTime(_month.year, _month.month + delta);
-                    }),
-                    onAdd: () => _showEntry(),
-                  ),
+                  if (wide)
+                    _NavigationPanel(
+                      selected: _tab,
+                      onSelect: _goTo,
+                      store: store,
+                    ),
                   Expanded(
-                    child: IndexedStack(index: _tab, children: pages),
+                    child: Column(
+                      children: [
+                        _TopBar(
+                          month: _month,
+                          settings: store.settings,
+                          remaining: store.remaining,
+                          onMonthChanged: (delta) => setState(() {
+                            _month = DateTime(
+                              _month.year,
+                              _month.month + delta,
+                            );
+                          }),
+                          onAdd: () => _showEntry(),
+                        ),
+                        Expanded(
+                          child: IndexedStack(index: _tab, children: pages),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
-          ],
+            bottomNavigationBar: wide
+                ? null
+                : NavigationBar(
+                    selectedIndex: _tab,
+                    onDestinationSelected: _goTo,
+                    backgroundColor: _surface,
+                    indicatorColor:
+                        (_paletteColors[store.settings.palette] ??
+                                Colors.purple)
+                            .withValues(alpha: .18),
+                    destinations: const [
+                      NavigationDestination(
+                        icon: Icon(Icons.grid_view_rounded),
+                        label: 'Home',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.receipt_long_outlined),
+                        label: 'Expenses',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.calendar_month_outlined),
+                        label: 'Calendar',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.bar_chart_rounded),
+                        label: 'Analytics',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.settings_outlined),
+                        label: 'Settings',
+                      ),
+                    ],
+                  ),
+            floatingActionButton: !wide && _tab != 4
+                ? FloatingActionButton(
+                    onPressed: () => _showEntry(),
+                    backgroundColor: _paletteColors[store.settings.palette],
+                    foregroundColor: Colors.white,
+                    child: const Icon(Icons.add_rounded),
+                  )
+                : null,
+          ),
         ),
       ),
-      bottomNavigationBar: wide
-          ? null
-          : NavigationBar(
-              selectedIndex: _tab,
-              onDestinationSelected: _goTo,
-              backgroundColor: _surface,
-              indicatorColor:
-                  (_paletteColors[store.settings.palette] ?? Colors.purple)
-                      .withValues(alpha: .18),
-              destinations: const [
-                NavigationDestination(
-                  icon: Icon(Icons.grid_view_rounded),
-                  label: 'Home',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.receipt_long_outlined),
-                  label: 'Expenses',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.calendar_month_outlined),
-                  label: 'Calendar',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.bar_chart_rounded),
-                  label: 'Analytics',
-                ),
-                NavigationDestination(
-                  icon: Icon(Icons.settings_outlined),
-                  label: 'Settings',
-                ),
-              ],
-            ),
-      floatingActionButton: !wide && _tab != 4
-          ? FloatingActionButton(
-              onPressed: () => _showEntry(),
-              backgroundColor: _paletteColors[store.settings.palette],
-              foregroundColor: Colors.white,
-              child: const Icon(Icons.add_rounded),
-            )
-          : null,
     );
   }
 
@@ -794,19 +871,16 @@ class _FinanceHomeState extends State<FinanceHome> with WidgetsBindingObserver {
           ),
           child: Column(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      decoration: const InputDecoration(
-                        hintText: 'Search transactions',
-                        prefixIcon: Icon(Icons.search_rounded),
-                      ),
-                      onChanged: (value) => setState(() => _query = value),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final searchField = TextField(
+                    decoration: const InputDecoration(
+                      hintText: 'Search transactions',
+                      prefixIcon: Icon(Icons.search_rounded),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  DropdownButton<String>(
+                    onChanged: (value) => setState(() => _query = value),
+                  );
+                  final categoryDropdown = DropdownButton<String>(
                     value: _filterCategory,
                     dropdownColor: _surfaceRaised,
                     underline: const SizedBox.shrink(),
@@ -824,8 +898,25 @@ class _FinanceHomeState extends State<FinanceHome> with WidgetsBindingObserver {
                     onChanged: (value) => setState(() {
                       _filterCategory = value ?? 'All Categories';
                     }),
-                  ),
-                ],
+                  );
+                  if (constraints.maxWidth < 620) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        searchField,
+                        const SizedBox(height: 8),
+                        categoryDropdown,
+                      ],
+                    );
+                  }
+                  return Row(
+                    children: [
+                      Expanded(child: searchField),
+                      const SizedBox(width: 8),
+                      categoryDropdown,
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 8),
               _transactionList(visible, allowDelete: true),
@@ -1634,12 +1725,18 @@ class _FinanceHomeState extends State<FinanceHome> with WidgetsBindingObserver {
   }) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        final isMacOS = Theme.of(context).platform == TargetPlatform.macOS;
         final wide = constraints.maxWidth >= 760;
         return SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(wide ? 26 : 16, 22, wide ? 26 : 16, 32),
+          padding: EdgeInsets.fromLTRB(
+            wide ? (isMacOS ? 30 : 26) : 16,
+            isMacOS ? 26 : 22,
+            wide ? (isMacOS ? 30 : 26) : 16,
+            32,
+          ),
           child: Center(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1240),
+              constraints: BoxConstraints(maxWidth: isMacOS ? 1320 : 1240),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -1652,10 +1749,12 @@ class _FinanceHomeState extends State<FinanceHome> with WidgetsBindingObserver {
                           children: [
                             Text(
                               title,
-                              style: const TextStyle(
-                                fontSize: 25,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -.5,
+                              style: TextStyle(
+                                fontSize: isMacOS ? 28 : 25,
+                                fontWeight: isMacOS
+                                    ? FontWeight.w700
+                                    : FontWeight.w800,
+                                letterSpacing: isMacOS ? -.3 : -.5,
                               ),
                             ),
                             const SizedBox(height: 5),
@@ -1663,7 +1762,7 @@ class _FinanceHomeState extends State<FinanceHome> with WidgetsBindingObserver {
                               subtitle,
                               style: const TextStyle(
                                 color: _muted,
-                                fontSize: 12,
+                                fontSize: 13,
                               ),
                             ),
                           ],
@@ -1692,39 +1791,42 @@ class _FinanceHomeState extends State<FinanceHome> with WidgetsBindingObserver {
     required String header,
     required Widget child,
     Widget? trailing,
-  }) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: _surface,
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: _stroke),
-    ),
-    child: Material(
-      color: Colors.transparent,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  header,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
+  }) {
+    final isMacOS = Theme.of(context).platform == TargetPlatform.macOS;
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(isMacOS ? 20 : 16),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(isMacOS ? 13 : 16),
+        border: Border.all(color: _stroke),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    header,
+                    style: TextStyle(
+                      fontSize: isMacOS ? 16 : 15,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-              ),
-              ?trailing,
-            ],
-          ),
-          const SizedBox(height: 14),
-          child,
-        ],
+                ?trailing,
+              ],
+            ),
+            const SizedBox(height: 14),
+            child,
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 
   Widget _responsiveCards(List<Widget> cards, int columns) {
     if (columns == 1) {
@@ -1927,6 +2029,53 @@ class _FinanceHomeState extends State<FinanceHome> with WidgetsBindingObserver {
               entry.date.day == date.day,
         )
         .toList();
+    if (Theme.of(context).platform == TargetPlatform.macOS) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => Dialog(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 560,
+              maxHeight: MediaQuery.sizeOf(context).height * .8,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _formatDate(date),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: _transactionList(entries),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _showEntry();
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add transaction'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      return;
+    }
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: _surface,
@@ -1981,136 +2130,143 @@ class _NavigationPanel extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: 220,
-    color: _surface,
-    padding: const EdgeInsets.fromLTRB(14, 18, 14, 14),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: (_paletteColors[store.settings.palette] ?? Colors.purple)
-                    .withValues(alpha: .17),
-                borderRadius: BorderRadius.circular(11),
-              ),
-              child: Icon(
-                Icons.bolt_rounded,
-                color: _paletteColors[store.settings.palette],
-              ),
-            ),
-            const SizedBox(width: 9),
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Pulse Finance',
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14),
-                  ),
-                  Text(
-                    'University Tracker',
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: _muted, fontSize: 10),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 28),
-        ...List.generate(_items.length, (index) {
-          final item = _items[index];
-          final active = selected == index;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-              child: ListTile(
-                dense: true,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                selected: active,
-                selectedTileColor: _surfaceRaised,
-                leading: Icon(
-                  item.$1,
-                  size: 19,
-                  color: active
-                      ? _paletteColors[store.settings.palette]
-                      : _muted,
-                ),
-                title: Text(
-                  item.$2,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                  ),
-                ),
-                onTap: () => onSelect(index),
-              ),
-            ),
-          );
-        }),
-        const Spacer(),
-        _SummaryCard(
-          label: 'TODAY\'S LIMIT',
-          value: money(store.currentDaySpend, store.settings),
-          detail:
-              '${money((store.settings.dailyLimit - store.currentDaySpend).clamp(0, double.infinity), store.settings)} left today',
-          icon: Icons.speed_rounded,
-          progress: store.settings.dailyLimit <= 0
-              ? 0
-              : (store.currentDaySpend / store.settings.dailyLimit)
-                    .clamp(0, 1)
-                    .toDouble(),
-          color: _green,
-          compact: true,
-        ),
-        const SizedBox(height: 10),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: _background,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: _stroke),
-          ),
-          child: Row(
+  Widget build(BuildContext context) {
+    final isMacOS = Theme.of(context).platform == TargetPlatform.macOS;
+    final accent = _paletteColors[store.settings.palette] ?? Colors.purple;
+    return Container(
+      width: isMacOS ? 232 : 220,
+      decoration: BoxDecoration(
+        color: isMacOS ? _background : _surface,
+        border: const Border(right: BorderSide(color: _stroke)),
+      ),
+      padding: EdgeInsets.fromLTRB(14, isMacOS ? 24 : 18, 14, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              CircleAvatar(
-                radius: 16,
-                backgroundColor: _surfaceRaised,
-                child: Text(
-                  store.settings.name.isEmpty
-                      ? 'PF'
-                      : store.settings.name.substring(0, 1).toUpperCase(),
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: .17),
+                  borderRadius: BorderRadius.circular(isMacOS ? 10 : 11),
                 ),
+                child: Icon(Icons.bolt_rounded, color: accent),
               ),
               const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  store.settings.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                  ),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Pulse Finance',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                      ),
+                    ),
+                    Text(
+                      'University Tracker',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: _muted, fontSize: 10),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
-        ),
-      ],
-    ),
-  );
+          const SizedBox(height: 28),
+          ...List.generate(_items.length, (index) {
+            final item = _items[index];
+            final active = selected == index;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Material(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(9),
+                child: ListTile(
+                  dense: true,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  selected: active,
+                  selectedTileColor: isMacOS
+                      ? accent.withValues(alpha: .16)
+                      : _surfaceRaised,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                  leading: Icon(
+                    item.$1,
+                    size: isMacOS ? 17 : 19,
+                    color: active ? accent : _muted,
+                  ),
+                  title: Text(
+                    item.$2,
+                    style: TextStyle(
+                      fontSize: isMacOS ? 13 : 12,
+                      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                  onTap: () => onSelect(index),
+                ),
+              ),
+            );
+          }),
+          const Spacer(),
+          _SummaryCard(
+            label: 'TODAY\'S LIMIT',
+            value: money(store.currentDaySpend, store.settings),
+            detail:
+                '${money((store.settings.dailyLimit - store.currentDaySpend).clamp(0, double.infinity), store.settings)} left today',
+            icon: Icons.speed_rounded,
+            progress: store.settings.dailyLimit <= 0
+                ? 0
+                : (store.currentDaySpend / store.settings.dailyLimit)
+                      .clamp(0, 1)
+                      .toDouble(),
+            color: _green,
+            compact: true,
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _background,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _stroke),
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: _surfaceRaised,
+                  child: Text(
+                    store.settings.name.isEmpty
+                        ? 'PF'
+                        : store.settings.name.substring(0, 1).toUpperCase(),
+                  ),
+                ),
+                const SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    store.settings.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _TopBar extends StatelessWidget {
@@ -2129,12 +2285,15 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final wide = MediaQuery.sizeOf(context).width >= 1200;
+    final isMacOS = Theme.of(context).platform == TargetPlatform.macOS;
+    final width = MediaQuery.sizeOf(context).width;
+    final wide = width >= (isMacOS ? 1000 : 1200);
+    final roomy = width >= 1100;
     return Container(
-      height: 58,
+      height: isMacOS ? 64 : 58,
       padding: EdgeInsets.symmetric(horizontal: wide ? 22 : 14),
       decoration: const BoxDecoration(
-        color: _surface,
+        color: _background,
         border: Border(bottom: BorderSide(color: _stroke)),
       ),
       child: Row(
@@ -2174,22 +2333,27 @@ class _TopBar extends StatelessWidget {
               onPressed: () => onMonthChanged(1),
               icon: const Icon(Icons.chevron_right, size: 18),
             ),
-            const SizedBox(width: 12),
-            Text(
-              '${settings.cycle} allowance · ${money(remaining, settings)}',
-              style: const TextStyle(
-                color: _green,
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
+            if (roomy) ...[
+              const SizedBox(width: 12),
+              Text(
+                '${settings.cycle} allowance · ${money(remaining, settings)}',
+                style: const TextStyle(
+                  color: _green,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
+              const SizedBox(width: 12),
+            ],
           ],
           if (wide)
-            FilledButton.icon(
-              onPressed: onAdd,
-              icon: const Icon(Icons.add, size: 17),
-              label: const Text('New entry'),
+            Tooltip(
+              message: isMacOS ? 'New expense (⌘N)' : 'New expense',
+              child: FilledButton.icon(
+                onPressed: onAdd,
+                icon: const Icon(Icons.add, size: 17),
+                label: const Text('New expense'),
+              ),
             )
           else
             IconButton(
@@ -2647,15 +2811,19 @@ class _EntrySheetState extends State<EntrySheet> {
   Widget build(BuildContext context) {
     final settings = widget.store.settings;
     final categories = settings.categories;
+    final isMacOS = Theme.of(context).platform == TargetPlatform.macOS;
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
       child: Container(
         constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * .92,
+          maxHeight: MediaQuery.sizeOf(context).height * (isMacOS ? .82 : .92),
         ),
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           color: _surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius: isMacOS
+              ? BorderRadius.circular(16)
+              : const BorderRadius.vertical(top: Radius.circular(24)),
+          border: isMacOS ? Border.all(color: _stroke) : null,
         ),
         child: SafeArea(
           top: false,
@@ -2666,17 +2834,18 @@ class _EntrySheetState extends State<EntrySheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Center(
-                    child: Container(
-                      width: 36,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: _stroke,
-                        borderRadius: BorderRadius.circular(5),
+                  if (!isMacOS)
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: _stroke,
+                          borderRadius: BorderRadius.circular(5),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 18),
+                  SizedBox(height: isMacOS ? 14 : 18),
                   Row(
                     children: [
                       Expanded(

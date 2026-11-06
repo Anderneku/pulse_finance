@@ -1,9 +1,13 @@
 # Pulse Finance
 
 Pulse Finance is an offline-first Flutter allowance and expense tracker for
-Android and iOS phones and tablets. It recreates the dark dashboard, violet
+Android and iOS phones and tablets, plus macOS. It recreates the dark dashboard, violet
 accent, transaction log, spending calendar, analytics, settings, and income /
 expense entry flows shown in the desktop reference.
+
+On macOS, the desktop layout uses a persistent sidebar, system typography,
+keyboard shortcuts (`⌘N` for a new expense and `⌘1`–`⌘5` to switch sections),
+and centered dialogs for desktop workflows.
 
 ## Features
 
@@ -31,8 +35,8 @@ flutter pub get
 flutter run
 ```
 
-For Android, use an Android SDK and emulator or connected device. Building or
-signing an iOS application requires macOS and Xcode.
+For Android, use an Android SDK and emulator or connected device. Building
+macOS or iOS applications requires macOS and Xcode.
 
 ## Validate
 

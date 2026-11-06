@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pulse_finance/finance_app.dart';
 
@@ -63,6 +64,56 @@ void main() {
 
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+  });
+
+  testWidgets('macOS uses a sidebar and a desktop expense dialog', (
+    tester,
+  ) async {
+    final store = FinanceStore(
+      settings: FinanceSettings(cycleStart: DateTime.now()),
+      entries: [],
+    );
+    tester.view.physicalSize = const Size(900, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(platform: TargetPlatform.macOS),
+        home: FinanceHome(store: store),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Dashboard'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Expenses'));
+    await tester.pumpAndSettle();
+    expect(find.text('Expenses log'), findsOneWidget);
+    final layoutError = tester.takeException();
+    final errorDetails = layoutError is FlutterError
+        ? layoutError.diagnostics
+              .map((diagnostic) => diagnostic.toString())
+              .join('\n')
+        : '$layoutError';
+    expect(layoutError, isNull, reason: errorDetails);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyN);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyN);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Record new expense'), findsOneWidget);
+    final dialogError = tester.takeException();
+    expect(
+      dialogError,
+      isNull,
+      reason: dialogError is FlutterError
+          ? dialogError.toStringDeep()
+          : '$dialogError',
+    );
   });
 
   testWidgets('dashboard displays allowance and section navigation works', (
